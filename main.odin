@@ -266,6 +266,78 @@ testCommandQueue :: proc(device: wgpu.Device) {
 	wgpu.QueueRelease(queue)
 }
 
+
+clearScreen :: proc(device: wgpu.Device, texView: wgpu.TextureView) {
+	queue := wgpu.DeviceGetQueue(device)
+
+	{
+		UserData :: struct {
+			done: bool,
+		}
+
+		onDone := proc "c" (
+			status: wgpu.QueueWorkDoneStatus,
+			userData: rawptr,
+			userData2: rawptr,
+		) {
+			context = runtime.default_context()
+			//fmt.printf("Finished Clearing with status: %v", status)
+			data := transmute(^UserData)userData
+			data.done = true
+		}
+
+		data := UserData{false}
+
+		wgpu.QueueOnSubmittedWorkDone(
+			queue,
+			wgpu.QueueWorkDoneCallbackInfo{callback = onDone, userdata1 = &data},
+		)
+
+
+		encoderDesc := wgpu.CommandEncoderDescriptor {
+			label = "my command encoder",
+		}
+
+		encoder := wgpu.DeviceCreateCommandEncoder(device, &encoderDesc)
+
+
+		renderPassColorAttachment := wgpu.RenderPassColorAttachment {
+			view       = texView,
+			loadOp     = .Clear,
+			storeOp    = .Store,
+			clearValue = wgpu.Color{0.9, 0.1, 0.2, 1.0},
+			depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+		}
+
+
+		renderPassDescriptor := wgpu.RenderPassDescriptor {
+			colorAttachmentCount = 1,
+			colorAttachments     = &renderPassColorAttachment,
+		}
+		renderPass := wgpu.CommandEncoderBeginRenderPass(encoder, &renderPassDescriptor)
+
+
+		wgpu.RenderPassEncoderEnd(renderPass)
+
+		cmdBufferDesc := wgpu.CommandBufferDescriptor {
+			label = "my command buffer",
+		}
+
+		cmdBuffer := wgpu.CommandEncoderFinish(encoder, &cmdBufferDesc)
+
+
+		bufferArr := []wgpu.CommandBuffer{cmdBuffer}
+		wgpu.QueueSubmit(queue, bufferArr)
+
+		wgpu.CommandBufferRelease(cmdBuffer)
+		wgpu.CommandEncoderRelease(encoder)
+
+		wgpu.DevicePoll(device, false, nil)
+	}
+
+	wgpu.QueueRelease(queue)
+}
+
 main :: proc() {
 	flags := sdl3.InitFlags{.VIDEO, .EVENTS}
 	sdlRes := sdl3.Init(flags)
@@ -296,17 +368,7 @@ main :: proc() {
 		fmt.println("WGPU instance created successfully")
 	}
 
-	surface := sdl3glue.GetSurface(wgpu_instance, window)
-
-	if surface == nil {
-		fmt.println("Surface creation failed")
-		os.exit(1)
-	} else {
-		fmt.println("Surface created successfully")
-	}
-
 	adapter := RequestAdapterSync(wgpu_instance)
-	wgpu.InstanceRelease(wgpu_instance)
 
 	if adapter == nil {
 		fmt.println("Fuck")
@@ -320,6 +382,7 @@ main :: proc() {
 	printProperties(adapter)
 
 	device := getDeviceSync(adapter)
+
 	wgpu.AdapterRelease(adapter)
 
 
@@ -333,15 +396,72 @@ main :: proc() {
 	inspectDevice(device)
 	testCommandQueue(device)
 
+	surface := sdl3glue.GetSurface(wgpu_instance, window)
+	wgpu.InstanceRelease(wgpu_instance)
+
+	if surface == nil {
+		fmt.println("Surface creation failed")
+		os.exit(1)
+	} else {
+		fmt.println("Surface created successfully")
+	}
+
+	surfaceConfig := wgpu.SurfaceConfiguration {
+		width           = 800,
+		height          = 800,
+		viewFormatCount = 0,
+		format          = .BGRA8Unorm,
+		usage           = {wgpu.TextureUsage.RenderAttachment},
+		device          = device,
+		presentMode     = .Fifo,
+		alphaMode       = .Auto,
+	}
+
+	wgpu.SurfaceConfigure(surface, &surfaceConfig)
+
 	event: sdl3.Event
 	running := true
 
+	now := sdl3.GetPerformanceCounter()
+	last: u64
+	dt: f32
+
 	for running {
+
+		last = now
+		now = sdl3.GetPerformanceCounter()
+		dt = f32((now - last) * 1000) / f32(sdl3.GetPerformanceFrequency())
+
 		for sdl3.PollEvent(&event) {
-			if event.type == sdl3.EventType.QUIT {
-				fmt.println("Quitting...")
+			if event.type == .QUIT {
 				running = false
 			}
+		}
+
+		// Render Frame
+		{
+			tex := wgpu.SurfaceGetCurrentTexture(surface)
+
+			if tex.status == .SuccessOptimal {
+				textureViewDesc := wgpu.TextureViewDescriptor {
+					label           = "Surface Texture View",
+					format          = wgpu.TextureGetFormat(tex.texture),
+					dimension       = ._2D,
+					baseMipLevel    = 0,
+					mipLevelCount   = 1,
+					baseArrayLayer  = 0,
+					arrayLayerCount = 1,
+					aspect          = .All,
+				}
+				textureView := wgpu.TextureCreateView(tex.texture, &textureViewDesc)
+
+
+				clearScreen(device, textureView)
+
+				wgpu.SurfacePresent(surface)
+				wgpu.TextureViewRelease(textureView)
+			}
+			wgpu.TextureRelease(tex.texture)
 		}
 	}
 
