@@ -211,6 +211,61 @@ inspectDevice :: proc(device: wgpu.Device) {
 	}
 }
 
+testCommandQueue :: proc(device: wgpu.Device) {
+	queue := wgpu.DeviceGetQueue(device)
+
+	{
+		UserData :: struct {
+			done: bool,
+		}
+
+		onDone := proc "c" (
+			status: wgpu.QueueWorkDoneStatus,
+			userData: rawptr,
+			userData2: rawptr,
+		) {
+			context = runtime.default_context()
+			fmt.printf("Queue work done with status: %v", status)
+			data := transmute(^UserData)userData
+			data.done = true
+		}
+
+		data := UserData{false}
+
+		wgpu.QueueOnSubmittedWorkDone(
+			queue,
+			wgpu.QueueWorkDoneCallbackInfo{callback = onDone, userdata1 = &data},
+		)
+
+
+		encoderDesc := wgpu.CommandEncoderDescriptor {
+			label = "my command encoder",
+		}
+
+		encoder := wgpu.DeviceCreateCommandEncoder(device, &encoderDesc)
+
+		wgpu.CommandEncoderInsertDebugMarker(encoder, "Debug Marker I")
+		wgpu.CommandEncoderInsertDebugMarker(encoder, "Debug Marker II")
+
+		cmdBufferDesc := wgpu.CommandBufferDescriptor {
+			label = "my command buffer",
+		}
+
+		cmdBuffer := wgpu.CommandEncoderFinish(encoder, &cmdBufferDesc)
+
+
+		bufferArr := []wgpu.CommandBuffer{cmdBuffer}
+		wgpu.QueueSubmit(queue, bufferArr)
+
+		wgpu.CommandBufferRelease(cmdBuffer)
+		wgpu.CommandEncoderRelease(encoder)
+
+		wgpu.DevicePoll(device, false, nil)
+	}
+
+	wgpu.QueueRelease(queue)
+}
+
 main :: proc() {
 	flags := sdl3.InitFlags{.VIDEO, .EVENTS}
 	sdlRes := sdl3.Init(flags)
@@ -267,6 +322,7 @@ main :: proc() {
 	device := getDeviceSync(adapter)
 	wgpu.AdapterRelease(adapter)
 
+
 	if device == nil {
 		fmt.println("Fuck")
 		os.exit(1)
@@ -275,6 +331,7 @@ main :: proc() {
 	}
 
 	inspectDevice(device)
+	testCommandQueue(device)
 
 	event: sdl3.Event
 	running := true
