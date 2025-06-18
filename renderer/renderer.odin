@@ -9,11 +9,13 @@ import "vendor:wgpu"
 import "vendor:wgpu/sdl3glue"
 
 Renderer :: struct {
-	window:     ^sdl3.Window,
-	surface:    wgpu.Surface,
-	device:     wgpu.Device,
-	queue:      wgpu.Queue,
-	queue_data: ^Queue_User_Data,
+	window:       ^sdl3.Window,
+	surface:      wgpu.Surface,
+	device:       wgpu.Device,
+	queue:        wgpu.Queue,
+	queue_data:   ^Queue_User_Data,
+	texture:      wgpu.Texture,
+	texture_view: wgpu.TextureView,
 }
 
 @(private = "file")
@@ -269,11 +271,6 @@ init_renderer :: proc() -> (Renderer, bool) {
 	queue := wgpu.DeviceGetQueue(device)
 	queue_user_data := new(Queue_User_Data)
 
-	wgpu.QueueOnSubmittedWorkDone(
-		queue,
-		wgpu.QueueWorkDoneCallbackInfo{callback = on_queue_done, userdata1 = &queue_user_data},
-	)
-
 	window := sdl3.CreateWindow("Mjolnir", 800, 600, nil)
 
 	if window == nil {
@@ -351,6 +348,78 @@ renderer_test_command_queue :: proc(renderer: ^Renderer) -> bool {
 
 	return renderer.queue_data.success
 }
+
+
+start_frame :: proc(renderer: ^Renderer) {
+	tex := wgpu.SurfaceGetCurrentTexture(renderer.surface)
+
+	if tex.status == .SuccessOptimal {
+		textureViewDesc := wgpu.TextureViewDescriptor {
+			label           = "Surface Texture View",
+			format          = wgpu.TextureGetFormat(tex.texture),
+			dimension       = ._2D,
+			baseMipLevel    = 0,
+			mipLevelCount   = 1,
+			baseArrayLayer  = 0,
+			arrayLayerCount = 1,
+			aspect          = .All,
+		}
+		textureView := wgpu.TextureCreateView(tex.texture, &textureViewDesc)
+		renderer.texture = tex.texture
+		renderer.texture_view = textureView
+	} else {
+		panic("Couldnt get surface textures for next frame")
+	}
+
+}
+
+end_frame :: proc(renderer: ^Renderer) {
+	wgpu.SurfacePresent(renderer.surface)
+	wgpu.TextureViewRelease(renderer.texture_view)
+	wgpu.TextureRelease(renderer.texture)
+
+}
+
+clear_screen :: proc(renderer: Renderer) {
+	encoderDesc := wgpu.CommandEncoderDescriptor {
+		label = "Clearing command encoder",
+	}
+
+	encoder := wgpu.DeviceCreateCommandEncoder(renderer.device, &encoderDesc)
+	defer wgpu.CommandEncoderRelease(encoder)
+
+
+	renderPassColorAttachment := wgpu.RenderPassColorAttachment {
+		view       = renderer.texture_view,
+		loadOp     = .Clear,
+		storeOp    = .Store,
+		clearValue = wgpu.Color{0.9, 0.1, 0.2, 1.0},
+		depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+	}
+
+
+	renderPassDescriptor := wgpu.RenderPassDescriptor {
+		colorAttachmentCount = 1,
+		colorAttachments     = &renderPassColorAttachment,
+	}
+	renderPass := wgpu.CommandEncoderBeginRenderPass(encoder, &renderPassDescriptor)
+
+
+	wgpu.RenderPassEncoderEnd(renderPass)
+
+	cmdBufferDesc := wgpu.CommandBufferDescriptor {
+		label = "Clearing command buffer",
+	}
+
+	cmdBuffer := wgpu.CommandEncoderFinish(encoder, &cmdBufferDesc)
+	defer wgpu.CommandBufferRelease(cmdBuffer)
+
+	bufferArr := []wgpu.CommandBuffer{cmdBuffer}
+	wgpu.QueueSubmit(renderer.queue, bufferArr)
+
+	wgpu.DevicePoll(renderer.device, true, nil)
+}
+
 
 deinit_renderer :: proc(renderer: Renderer) {
 	wgpu.SurfaceRelease(renderer.surface)
