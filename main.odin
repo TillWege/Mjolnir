@@ -9,6 +9,7 @@ import "vendor:sdl3"
 import "vendor:wgpu"
 import "vendor:wgpu/sdl3glue"
 
+
 main :: proc() {
 	flags := sdl3.InitFlags{.VIDEO, .EVENTS}
 	sdlRes := sdl3.Init(flags)
@@ -39,6 +40,9 @@ main :: proc() {
 	last: u64
 	dt: f32
 
+	shader := r.init_shader(ren)
+	pipeline := r.init_pipeline(ren, shader)
+
 	for running {
 
 		last = now
@@ -53,8 +57,12 @@ main :: proc() {
 
 		r.start_frame(&ren)
 		r.clear_screen(ren)
+		r.render_pipeline(ren, pipeline)
 		r.end_frame(&ren)
 	}
+
+	r.deinit_pipeline(pipeline)
+	r.deinit_shader(shader)
 	r.deinit_renderer(ren)
 	sdl3.Quit()
 

@@ -349,7 +349,6 @@ renderer_test_command_queue :: proc(renderer: ^Renderer) -> bool {
 	return renderer.queue_data.success
 }
 
-
 start_frame :: proc(renderer: ^Renderer) {
 	tex := wgpu.SurfaceGetCurrentTexture(renderer.surface)
 
@@ -404,6 +403,47 @@ clear_screen :: proc(renderer: Renderer) {
 	}
 	renderPass := wgpu.CommandEncoderBeginRenderPass(encoder, &renderPassDescriptor)
 
+
+	wgpu.RenderPassEncoderEnd(renderPass)
+
+	cmdBufferDesc := wgpu.CommandBufferDescriptor {
+		label = "Clearing command buffer",
+	}
+
+	cmdBuffer := wgpu.CommandEncoderFinish(encoder, &cmdBufferDesc)
+	defer wgpu.CommandBufferRelease(cmdBuffer)
+
+	bufferArr := []wgpu.CommandBuffer{cmdBuffer}
+	wgpu.QueueSubmit(renderer.queue, bufferArr)
+
+	wgpu.DevicePoll(renderer.device, true, nil)
+}
+
+render_pipeline :: proc(renderer: Renderer, pipeline: wgpu.RenderPipeline) {
+	encoderDesc := wgpu.CommandEncoderDescriptor {
+		label = "Clearing command encoder",
+	}
+
+	encoder := wgpu.DeviceCreateCommandEncoder(renderer.device, &encoderDesc)
+	defer wgpu.CommandEncoderRelease(encoder)
+
+
+	renderPassColorAttachment := wgpu.RenderPassColorAttachment {
+		view       = renderer.texture_view,
+		loadOp     = .Load,
+		storeOp    = .Store,
+		depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
+	}
+
+
+	renderPassDescriptor := wgpu.RenderPassDescriptor {
+		colorAttachmentCount = 1,
+		colorAttachments     = &renderPassColorAttachment,
+	}
+	renderPass := wgpu.CommandEncoderBeginRenderPass(encoder, &renderPassDescriptor)
+
+	wgpu.RenderPassEncoderSetPipeline(renderPass, pipeline)
+	wgpu.RenderPassEncoderDraw(renderPass, 3, 1, 0, 0)
 
 	wgpu.RenderPassEncoderEnd(renderPass)
 
