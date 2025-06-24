@@ -27,7 +27,6 @@ main :: proc() {
 		panic("Couldnt init Renderer")
 	}
 
-
 	test_res := r.renderer_test_command_queue(&ren)
 
 	fmt.printfln("Tesing Result: %v", test_res)
@@ -52,7 +51,18 @@ main :: proc() {
 		for sdl3.PollEvent(&event) {
 			if event.type == .QUIT {
 				running = false
+			} else if event.type == .KEY_UP {
+				if event.key.scancode == .B {
+					fmt.println("Testing buffers...")
+					r.test_buffers(ren)
+				} else {
+					fmt.printfln("Key: %v", event.key)
+				}
+
+
 			}
+
+
 		}
 
 		r.start_frame(&ren)

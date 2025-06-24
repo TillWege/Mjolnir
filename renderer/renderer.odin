@@ -435,11 +435,11 @@ render_pipeline :: proc(renderer: Renderer, pipeline: wgpu.RenderPipeline) {
 		depthSlice = wgpu.DEPTH_SLICE_UNDEFINED,
 	}
 
-
 	renderPassDescriptor := wgpu.RenderPassDescriptor {
 		colorAttachmentCount = 1,
 		colorAttachments     = &renderPassColorAttachment,
 	}
+
 	renderPass := wgpu.CommandEncoderBeginRenderPass(encoder, &renderPassDescriptor)
 
 	wgpu.RenderPassEncoderSetPipeline(renderPass, pipeline)
@@ -458,6 +458,78 @@ render_pipeline :: proc(renderer: Renderer, pipeline: wgpu.RenderPipeline) {
 	wgpu.QueueSubmit(renderer.queue, bufferArr)
 
 	wgpu.DevicePoll(renderer.device, true, nil)
+}
+
+test_buffers :: proc(renderer: Renderer) {
+
+	// write
+
+	dataType :: u8
+
+	data_len: u64 = 32
+
+
+	bufferDesc := wgpu.BufferDescriptor {
+		label            = "Input Buffer",
+		usage            = {.CopyDst, .CopySrc},
+		size             = data_len,
+		mappedAtCreation = false,
+	}
+
+	inputBuffer := wgpu.DeviceCreateBuffer(renderer.device, &bufferDesc)
+
+	bufferDesc.label = "Output Buffer"
+	bufferDesc.usage = {.CopyDst, .MapRead}
+	outputBuffer := wgpu.DeviceCreateBuffer(renderer.device, &bufferDesc)
+
+	defer wgpu.BufferRelease(outputBuffer)
+	defer wgpu.BufferRelease(inputBuffer)
+
+	data := [dynamic]u8{}
+	defer delete(data)
+
+	for i in 0 ..< data_len {
+		append(&data, u8(i))
+	}
+
+	fmt.printfln("Data to upload: %v", data)
+
+	wgpu.QueueWriteBuffer(renderer.queue, inputBuffer, 0, &data[0], uint(data_len))
+
+	// copy 
+
+	encoder := wgpu.DeviceCreateCommandEncoder(renderer.device, nil)
+	defer wgpu.CommandEncoderRelease(encoder)
+
+	wgpu.CommandEncoderCopyBufferToBuffer(encoder, inputBuffer, 0, outputBuffer, 0, data_len)
+	command := wgpu.CommandEncoderFinish(encoder)
+	defer wgpu.CommandBufferRelease(command)
+
+	wgpu.QueueSubmit(renderer.queue, {command})
+
+	// read back
+
+	read_callback := proc "c" (
+		status: wgpu.MapAsyncStatus,
+		message: wgpu.StringView,
+		userdata1: rawptr,
+		userdata2: rawptr,
+	) {
+		context = runtime.default_context()
+		fmt.printfln("Read output buff with status: %v and msg: %v", status, message)
+	}
+
+	readDesc := wgpu.BufferMapCallbackInfo {
+		callback = read_callback,
+	}
+	wgpu.BufferMapAsync(outputBuffer, {.Read}, 0, uint(data_len), readDesc)
+	wgpu.DevicePoll(renderer.device, true)
+
+	fmt.println("continuing...")
+
+	val := wgpu.BufferGetConstMappedRange(outputBuffer, 0, uint(data_len))
+	fmt.printfln("Returned Data after copy: %v", val)
+	wgpu.BufferUnmap(outputBuffer)
 }
 
 
