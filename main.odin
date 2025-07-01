@@ -41,13 +41,20 @@ main :: proc() {
 
 	shader := r.init_shader(ren)
 	pipeline := r.init_pipeline(ren, shader)
+	obj := r.create_tri_object(ren)
+	vsync := true
 
+
+	print_perf := false
 	for running {
 
 		last = now
 		now = sdl3.GetPerformanceCounter()
 		dt = f32((now - last) * 1000) / f32(sdl3.GetPerformanceFrequency())
 
+		if print_perf {
+			fmt.printfln("Frametime: %v", dt)
+		}
 		for sdl3.PollEvent(&event) {
 			if event.type == .QUIT {
 				running = false
@@ -55,22 +62,25 @@ main :: proc() {
 				if event.key.scancode == .B {
 					fmt.println("Testing buffers...")
 					r.test_buffers(ren)
+				} else if event.key.scancode == .P {
+					print_perf = !print_perf
+				} else if event.key.scancode == .V {
+					r.renderer_toggle_vsync(&ren, !vsync)
+					vsync = !vsync
+					fmt.printfln("Set VSync: %v", vsync)
 				} else {
 					fmt.printfln("Key: %v", event.key)
 				}
-
-
 			}
-
-
 		}
 
 		r.start_frame(&ren)
 		r.clear_screen(ren)
-		r.render_pipeline(ren, pipeline)
+		r.render_pipeline(ren, pipeline, obj)
 		r.end_frame(&ren)
 	}
 
+	r.deinit_object(obj)
 	r.deinit_pipeline(pipeline)
 	r.deinit_shader(shader)
 	r.deinit_renderer(ren)

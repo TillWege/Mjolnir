@@ -30,13 +30,26 @@ init_shader :: proc(renderer: Renderer) -> Shader {
 }
 
 init_pipeline :: proc(renderer: Renderer, shader: Shader) -> wgpu.RenderPipeline {
+	vertex_attribute := wgpu.VertexAttribute {
+		shaderLocation = 0,
+		format         = .Float32x2,
+		offset         = 0,
+	}
+
+	vertex_buffer_layout := wgpu.VertexBufferLayout {
+		attributeCount = 1,
+		attributes     = &vertex_attribute,
+		stepMode       = .Vertex,
+		arrayStride    = u64(size_of(f32) * 2),
+	}
+
 	vertex_state := wgpu.VertexState {
 		module        = shader.shader,
 		entryPoint    = "vs_main",
 		constantCount = 0,
 		constants     = nil,
-		bufferCount   = 0,
-		buffers       = nil,
+		bufferCount   = 1,
+		buffers       = &vertex_buffer_layout,
 	}
 
 	primitive_state := wgpu.PrimitiveState {

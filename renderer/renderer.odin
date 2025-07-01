@@ -2,7 +2,9 @@ package renderer
 
 import "base:runtime"
 import "core:fmt"
+import "core:os"
 import "core:reflect"
+import "core:sys/windows"
 import "core:time"
 import "vendor:sdl3"
 import "vendor:wgpu"
@@ -51,7 +53,10 @@ request_adapter_sync :: proc(instance: wgpu.Instance) -> wgpu.Adapter {
 	callbackInfo.callback = on_adapter
 	callbackInfo.userdata1 = &data
 
-	options: wgpu.RequestAdapterOptions = {}
+
+	options: wgpu.RequestAdapterOptions = {
+		backendType = ODIN_OS == .Windows ? wgpu.BackendType.D3D12 : nil,
+	}
 
 	wgpu.InstanceRequestAdapter(instance, &options, callbackInfo)
 
@@ -175,7 +180,6 @@ request_device_sync :: proc(adapter: wgpu.Adapter) -> wgpu.Device {
 		label = "Mjolnir Device",
 		requiredFeatures = {},
 		requiredFeatureCount = 0,
-		requiredLimits = {},
 		defaultQueue = {label = "Mjolnir Queue", nextInChain = nil},
 		deviceLostCallbackInfo = {callback = on_device_lost},
 		uncapturedErrorCallbackInfo = {callback = on_device_error},
@@ -197,7 +201,7 @@ print_device_info :: proc(device: wgpu.Device) {
 
 	fmt.println("Device Features:")
 	for i in 0 ..< features.featureCount {
-		fmt.printf("%s", features.features[i])
+		fmt.printfln("%s", features.features[i])
 	}
 
 	limits, status := wgpu.DeviceGetLimits(device)
@@ -216,7 +220,7 @@ print_device_info :: proc(device: wgpu.Device) {
 			} else {
 				fmt.printf("	%s: %v (%T)", name, val, type)
 			}
-			fmt.print("")
+			fmt.print("\n")
 		}
 	}
 }
@@ -268,10 +272,13 @@ init_renderer :: proc() -> (Renderer, bool) {
 		fmt.println("WGPU Device creation successfully")
 	}
 
+	print_adapter_info(adapter)
+	print_device_info(device)
+
 	queue := wgpu.DeviceGetQueue(device)
 	queue_user_data := new(Queue_User_Data)
 
-	window := sdl3.CreateWindow("Mjolnir", 800, 600, nil)
+	window := sdl3.CreateWindow("Mjolnir", 800, 600, {})
 
 	if window == nil {
 		fmt.println("Window creation failed")
@@ -310,6 +317,22 @@ init_renderer :: proc() -> (Renderer, bool) {
 			queue_data = queue_user_data,
 		},
 		true
+}
+
+renderer_toggle_vsync :: proc(renderer: ^Renderer, enabled: bool) {
+	surfaceConfig := wgpu.SurfaceConfiguration {
+		width           = 800,
+		height          = 800,
+		viewFormatCount = 0,
+		format          = .BGRA8Unorm,
+		usage           = {wgpu.TextureUsage.RenderAttachment},
+		device          = renderer.device,
+		presentMode     = enabled ? .Fifo : .Immediate,
+		alphaMode       = .Auto,
+	}
+
+	wgpu.SurfaceConfigure(renderer.surface, &surfaceConfig)
+
 }
 
 renderer_test_command_queue :: proc(renderer: ^Renderer) -> bool {
@@ -376,7 +399,6 @@ end_frame :: proc(renderer: ^Renderer) {
 	wgpu.SurfacePresent(renderer.surface)
 	wgpu.TextureViewRelease(renderer.texture_view)
 	wgpu.TextureRelease(renderer.texture)
-
 }
 
 clear_screen :: proc(renderer: Renderer) {
@@ -405,6 +427,7 @@ clear_screen :: proc(renderer: Renderer) {
 
 
 	wgpu.RenderPassEncoderEnd(renderPass)
+	wgpu.RenderPassEncoderRelease(renderPass)
 
 	cmdBufferDesc := wgpu.CommandBufferDescriptor {
 		label = "Clearing command buffer",
@@ -419,7 +442,7 @@ clear_screen :: proc(renderer: Renderer) {
 	wgpu.DevicePoll(renderer.device, true, nil)
 }
 
-render_pipeline :: proc(renderer: Renderer, pipeline: wgpu.RenderPipeline) {
+render_pipeline :: proc(renderer: Renderer, pipeline: wgpu.RenderPipeline, obj: Render_Object) {
 	encoderDesc := wgpu.CommandEncoderDescriptor {
 		label = "Clearing command encoder",
 	}
@@ -443,9 +466,17 @@ render_pipeline :: proc(renderer: Renderer, pipeline: wgpu.RenderPipeline) {
 	renderPass := wgpu.CommandEncoderBeginRenderPass(encoder, &renderPassDescriptor)
 
 	wgpu.RenderPassEncoderSetPipeline(renderPass, pipeline)
-	wgpu.RenderPassEncoderDraw(renderPass, 3, 1, 0, 0)
+	wgpu.RenderPassEncoderSetVertexBuffer(
+		renderPass,
+		0,
+		obj.buffer,
+		0,
+		wgpu.BufferGetSize(obj.buffer),
+	)
+	wgpu.RenderPassEncoderDraw(renderPass, obj.vertCount, 1, 0, 0)
 
 	wgpu.RenderPassEncoderEnd(renderPass)
+	wgpu.RenderPassEncoderRelease(renderPass)
 
 	cmdBufferDesc := wgpu.CommandBufferDescriptor {
 		label = "Clearing command buffer",
@@ -463,11 +494,7 @@ render_pipeline :: proc(renderer: Renderer, pipeline: wgpu.RenderPipeline) {
 test_buffers :: proc(renderer: Renderer) {
 
 	// write
-
-	dataType :: u8
-
 	data_len: u64 = 32
-
 
 	bufferDesc := wgpu.BufferDescriptor {
 		label            = "Input Buffer",
@@ -485,11 +512,10 @@ test_buffers :: proc(renderer: Renderer) {
 	defer wgpu.BufferRelease(outputBuffer)
 	defer wgpu.BufferRelease(inputBuffer)
 
-	data := [dynamic]u8{}
-	defer delete(data)
+	data := [32]u8{}
 
 	for i in 0 ..< data_len {
-		append(&data, u8(i))
+		data[i] = u8(i)
 	}
 
 	fmt.printfln("Data to upload: %v", data)
